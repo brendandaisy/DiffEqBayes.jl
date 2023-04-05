@@ -55,6 +55,25 @@ bayesian_result = turing_inference(prob1, Tsit5(), t, data, priors; num_samples 
 @test mean(get(bayesian_result, :a)[1])≈1.5 atol=3e-1
 @test mean(get(bayesian_result, :u1)[1])≈1.0 atol=3e-1
 
+println("One dimensional observation case")
+sol = solve(prob1, Tsit5(); save_idxs=1)
+t = collect(range(1, stop = 10, length=20))
+data = [sol(ts) + 0.01randn() for ts in t]
+priors = [Normal(1.5, 0.01)]
+
+bayesian_result = turing_inference(prob1, Tsit5(), t, data, priors; save_idxs=1, num_samples = 500,
+                                   syms = [:a], likelihood_dist_priors=[InverseGamma(4, 0.03)])
+
+@test mean(bayesian_result, :a)≈1.5 atol=0.1
+@test mean(bayesian_result, "σ[1]")≈0.01 atol=0.05
+
+priors = [Normal(1.0, 0.01), Normal(1.5, 0.01)]
+bayesian_result = turing_inference(prob1, Tsit5(), t, data, priors; save_idxs=1, num_samples = 500, sample_u0=true,
+                                   syms = [:u1, :a], likelihood_dist_priors=[InverseGamma(2, 0.01)])
+
+@test mean(bayesian_result, :a)≈1.5 atol=0.1
+@test mean(bayesian_result, :u1)≈1. atol=0.1
+
 println("Four parameter case")
 f2 = @ode_def begin
     dx = a * x - b * x * y

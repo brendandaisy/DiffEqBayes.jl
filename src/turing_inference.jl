@@ -15,17 +15,18 @@ function turing_inference(prob::DiffEqBase.DEProblem,
                           save_idxs = nothing,
                           progress = false,
                           kwargs...)
-    N = length(priors)
+
     Turing.@model function mf(x, ::Type{T} = Float64) where {T <: Real}
         theta = Vector{T}(undef, length(priors))
-        for i in 1:length(priors)
+        for i in eachindex(priors)
             theta[i] ~ NamedDist(priors[i], syms[i])
         end
         σ = Vector{T}(undef, length(likelihood_dist_priors))
-        for i in 1:length(likelihood_dist_priors)
+        for i in eachindex(likelihood_dist_priors)
             σ[i] ~ likelihood_dist_priors[i]
         end
-        nu = save_idxs === nothing ? length(prob.u0) : length(save_idxs)
+        _save_idxs = save_idxs !== nothing && ndims(save_idxs) == 0 ? [save_idxs] : save_idxs
+        nu = _save_idxs === nothing ? length(prob.u0) : length(_save_idxs)
         u0 = convert.(T, sample_u0 ? theta[1:nu] : prob.u0)
         p = convert.(T, sample_u0 ? theta[(nu + 1):end] : theta)
         if length(u0) < length(prob.u0)
@@ -35,15 +36,15 @@ function turing_inference(prob::DiffEqBase.DEProblem,
             end
         end
         _saveat = t === nothing ? Float64[] : t
-        sol = solve(prob, alg; u0 = u0, p = p, saveat = _saveat, progress = progress,
-                    save_idxs = save_idxs, kwargs...)
-        failure = size(sol, 2) < length(_saveat)
 
-        if failure
-            Turing.DynamicPPL.acclogp!!(__varinfo__, -Inf)
+        sol = solve(prob, alg; u0, p, saveat=_saveat, progress, save_idxs=_save_idxs, kwargs...)
+
+        if sol.retcode != :Success
+            Turing.@addlogprob!(-Inf)
             return
         end
-        if ndims(sol) == 1
+
+        if ndims(sol) == 1 # for e.g. SteadyState problems
             x ~ likelihood(Array(sol), theta, Inf, σ)
         else
             for i in 1:length(t)
@@ -53,8 +54,11 @@ function turing_inference(prob::DiffEqBase.DEProblem,
         return
     end false
 
+    if save_idxs !== nothing && ndims(save_idxs) == 0
+        data = reshape(data, 1, :)
+    end
     # Instantiate a Model object.
     model = mf(data)
-    chn = sample(model, sampler, num_samples; progress = progress)
+    chn = sample(model, sampler, num_samples; progress=progress)
     return chn
 end
